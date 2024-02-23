@@ -248,14 +248,14 @@ bool PyWrapper::convert(void* in_, MultiTypeValue& out)
         return true;
     }
 
-    if (PyList_Check(in)) {
+    if (PySequence_Check(in)) {
         out.type = MultiTypeValue::Type::NONE;
         out.vi.clear();
         out.vf.clear();
         out.vs.clear();
 
-        for (Py_ssize_t i = 0; i < PyList_Size(in); i++) {
-            PyObject* el = PyList_GetItem(in, i);
+        for (Py_ssize_t i = 0; i < PySequence_Size(in); i++) {
+            PyObject* el = PySequence_GetItem(in, i);
 #if PY_MAJOR_VERSION < 3
             if (PyInt_Check(el) && (out.type == MultiTypeValue::Type::NONE || out.type == MultiTypeValue::Type::VECTOR_INTEGER)) {
                 long val = PyInt_AsLong(el);
@@ -359,13 +359,13 @@ bool PyWrapper::exec(const std::string& line, bool debug, std::string& val)
         val = out.s;
         return true;
     case MultiTypeValue::Type::INTEGER:
-        val = std::to_string(out.i);
+        val = Util::to_string(out.i);
         return true;
     case MultiTypeValue::Type::FLOAT:
-        val = std::to_string(out.f);
+        val = Util::to_string(out.f);
         return true;
     case MultiTypeValue::Type::BOOL:
-        val = std::to_string(out.b);
+        val = Util::to_string(out.b);
         return true;
     default:
         return false;

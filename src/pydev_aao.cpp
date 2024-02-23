@@ -3,7 +3,7 @@
 * in file LICENSE that is included with this distribution.
 \*************************************************************************/
 
-#include <aiRecord.h>
+#include <aaoRecord.h>
 
 #include <alarm.h>
 #include <callback.h>
@@ -19,6 +19,8 @@
 #include "asyncexec.h"
 #include "pywrapper.h"
 #include "util.h"
+#include "util_array.h"
+#include <iostream>
 
 struct PyDevContext {
     CALLBACK callback;
@@ -43,9 +45,10 @@ static void scanCallback(IOSCANPVT scan)
 #endif
 }
 
-static long initRecord(aiRecord* rec)
+static long initRecord(aaoRecord* rec)
 {
-    std::string addr = rec->inp.value.instio.string;
+
+    std::string addr = rec->out.value.instio.string;
     void *buffer = callocMustSucceed(1, sizeof(PyDevContext), "PyDev::initRecord");
     PyDevContext* ctx = new (buffer) PyDevContext;
     rec->dpvt = ctx;
@@ -68,7 +71,7 @@ static long initRecord(aiRecord* rec)
     return 0;
 }
 
-static long getIointInfo(int /*direction*/, aiRecord *rec, IOSCANPVT* io)
+static long getIointInfo(int /*direction*/, aaoRecord *rec, IOSCANPVT* io)
 {
     auto ctx = reinterpret_cast<PyDevContext*>(rec->dpvt);
     if (ctx != nullptr && ctx->scan != nullptr) {
@@ -77,56 +80,40 @@ static long getIointInfo(int /*direction*/, aiRecord *rec, IOSCANPVT* io)
     return 0;
 }
 
-static void processRecordCb(aiRecord* rec)
+
+
+static void processRecordCb(aaoRecord* rec)
 {
     auto ctx = reinterpret_cast<PyDevContext*>(rec->dpvt);
 
-    rec->val -= rec->aoff;
-    if (rec->aslo != 0.0) rec->val /= rec->aslo;
-
-    auto fields = Util::getFields(rec->inp.value.instio.string);
+    auto fields = Util::getFields(rec->out.value.instio.string);
     for (auto& keyval: fields) {
-        if      (keyval.first == "VAL")  keyval.second = Util::to_string(rec->val);
-        else if (keyval.first == "RVAL") keyval.second = Util::to_string(rec->rval);
-        else if (keyval.first == "ORAW") keyval.second = Util::to_string(rec->oraw);
-        else if (keyval.first == "NAME") keyval.second = rec->name;
+        if      (keyval.first == "VAL")  keyval.second = rec_bptr_to_strings(rec);
+	else if (keyval.first == "NAME") keyval.second = rec->name;
         else if (keyval.first == "EGU")  keyval.second = rec->egu;
         else if (keyval.first == "HOPR") keyval.second = Util::to_string(rec->hopr);
         else if (keyval.first == "LOPR") keyval.second = Util::to_string(rec->lopr);
         else if (keyval.first == "PREC") keyval.second = Util::to_string(rec->prec);
         else if (keyval.first == "TPRO") keyval.second = Util::to_string(rec->tpro);
     }
-    std::string code = Util::replaceFields(rec->inp.value.instio.string, fields);
+    std::string code = Util::replaceFields(rec->out.value.instio.string, fields);
 
     try {
         epicsFloat64 val;
-        if (PyWrapper::exec(code, (rec->tpro == 1), &val) == true) {
-            val = (val * rec->aslo) + rec->aoff;
-            if (rec->smoo == 0.0 || rec->udf)
-                rec->val = val;
-            else
-                rec->val = (rec->val * rec->smoo) + (val * (1.0 - rec->smoo));
+	auto r = PyWrapper::exec(code, (rec->tpro == 1));
+        if (r.type == PyWrapper::MultiTypeValue::Type::NONE) {
             rec->udf = 0;
-            ctx->processCbStatus = 0;
-        } else {
-            if (rec->tpro == 1) {
-                printf("ERROR: Can't convert returned Python type to double type\n");
-            }
-            recGblSetSevr(rec, epicsAlarmCalc, epicsSevInvalid);
-            ctx->processCbStatus = -1;
         }
+        ctx->processCbStatus = 0;
     } catch (...) {
         recGblSetSevr(rec, epicsAlarmCalc, epicsSevInvalid);
         ctx->processCbStatus = -1;
     }
-
-    if (ctx->processCbStatus == 0)
-        ctx->processCbStatus = 2; // Conversion already done
-
     callbackRequestProcessCallback(&ctx->callback, rec->prio, rec);
+
 }
 
-static long processRecord(aiRecord* rec)
+static long processRecord(aaoRecord* rec)
 {
     auto ctx = reinterpret_cast<PyDevContext*>(rec->dpvt);
     if (ctx == nullptr) {
@@ -159,7 +146,7 @@ extern "C"
         DEVSUPFUN get_ioint_info{(DEVSUPFUN)getIointInfo};
         DEVSUPFUN write{(DEVSUPFUN)processRecord};
         DEVSUPFUN special_linconv{nullptr};
-    } devPyDevAi;
-    epicsExportAddress(dset, devPyDevAi);
+    } devPyDevAao;
+    epicsExportAddress(dset, devPyDevAao);
 
 }; // extern "C"

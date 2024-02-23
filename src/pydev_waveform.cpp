@@ -166,7 +166,7 @@ static long getIointInfo(int /*direction*/, waveformRecord *rec, IOSCANPVT* io)
 std::string arrayOfStrToStr(const std::vector<std::string>& val)
 {
     std::string value = "[";
-    for (const auto v: val) {
+    for (const auto& v: val) {
         value += "b\"" +  Util::escape(v) + "\",";
     }
     if (value.back() == ',') {
@@ -205,7 +205,7 @@ static void processRecordCb(waveformRecord* rec)
                 keyval.second = Util::to_pylist_string(arr);
             }
         }
-        else if (keyval.first == "TPRO") keyval.second = std::to_string(rec->tpro);
+        else if (keyval.first == "TPRO") keyval.second = Util::to_string(rec->tpro);
     }
     std::string code = Util::replaceFields(rec->inp.value.instio.string, fields);
 
