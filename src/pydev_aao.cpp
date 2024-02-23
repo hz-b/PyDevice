@@ -86,13 +86,10 @@ static void processRecordCb(aaoRecord* rec)
 {
     auto ctx = reinterpret_cast<PyDevContext*>(rec->dpvt);
 
-    std::cerr << "processRecordCb: nelm" << rec->nelm << " nord " << rec->nord << std::endl;
-
     auto fields = Util::getFields(rec->out.value.instio.string);
     for (auto& keyval: fields) {
-        if      (keyval.first == "VAL"){  keyval.second = rec_bptr_to_strings(rec);
-	    std::cerr << "processRecordCb" << keyval.second << std::endl;
-	}else if (keyval.first == "NAME") keyval.second = rec->name;
+        if      (keyval.first == "VAL")  keyval.second = rec_bptr_to_strings(rec);
+	else if (keyval.first == "NAME") keyval.second = rec->name;
         else if (keyval.first == "EGU")  keyval.second = rec->egu;
         else if (keyval.first == "HOPR") keyval.second = Util::to_string(rec->hopr);
         else if (keyval.first == "LOPR") keyval.second = Util::to_string(rec->lopr);
@@ -118,7 +115,6 @@ static void processRecordCb(aaoRecord* rec)
 
 static long processRecord(aaoRecord* rec)
 {
-    std::cerr << __FILE__ << " processing record " << std::endl;
     auto ctx = reinterpret_cast<PyDevContext*>(rec->dpvt);
     if (ctx == nullptr) {
         // Keep PACT=1 to prevent further processing
@@ -136,7 +132,6 @@ static long processRecord(aaoRecord* rec)
     auto scheduled = AsyncExec::schedule([rec]() {
         processRecordCb(rec);
     });
-    std::cerr << __FILE__ << " processed  record " << std::endl;
     return (scheduled ? 0 : -1);
 }
 
