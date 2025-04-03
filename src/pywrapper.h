@@ -43,7 +43,8 @@ class PyWrapper {
         {
             private:
                 void* code;
-                ByteCode(void*);
+                bool do_clear;
+                ByteCode(void*, bool);
                 ByteCode(ByteCode &) = delete;
                 ByteCode &operator=(const ByteCode &) = delete;
                 friend class PyWrapper;
@@ -53,6 +54,7 @@ class PyWrapper {
                 ByteCode(ByteCode&&);
                 ByteCode& operator=(ByteCode&&);
                 ~ByteCode();
+            bool clear_pyobjects() const;
         };
         using Callback = std::function<void()>;
     private:
@@ -64,12 +66,12 @@ class PyWrapper {
 
         /**
          * @brief Compile Python code into bytecode
-         * 
+         *
          * Compiling Python code into intermediate bytecode allows performance
          * gains when same code will be used many times. This will parse the
          * code, but not actually evaluate it.
          * This function runs under locked GIL environment.
-         * 
+         *
          * @param code Python code to be compiled
          * @param debug Prints errors to the EPICS console.
          * @return ByteCode Compiled bytecode, must be destroyed after not used any more.
@@ -78,25 +80,25 @@ class PyWrapper {
 
         /**
          * @brief Evaluate previously compiled bytecode and return result.
-         * 
+         *
          * Evaluating previously compiled bytecode will run the code and
          * optionally return the result.
          * This function runs under locked GIL environment.
-         * 
+         *
          * @param bytecode Previously compiled bytecode
          * @param args Optional arguments passed to Python code, aka functions etc.
          * @param debug Prints errors to the EPICS console.
-         * @return Variant 
+         * @return Variant
          */
         static Variant eval(const ByteCode& bytecode, const std::map<std::string, Variant> &args, bool debug);
 
         /**
          * @brief Execute (compile and eval) given Python code
-         * 
+         *
          * This is a convenience function that combines compiling Python
          * code and immediately evaluating it. This is useful when the code
          * is only specified once, for example when invoked from EPICS shell.
-         * 
+         *
          * @param code Python code to be executed
          * @param args Optional arguments to the Python function
          * @param debug Prints errors to the EPICS console.
@@ -106,10 +108,10 @@ class PyWrapper {
 
         /**
          * @brief Execute (compile and eval) given Python code with no arguments.
-         * 
+         *
          * This is a convenience function that combines compiling Python code
          * and immediately evaluating it, and not arguments are needed.
-         * 
+         *
          * @param code Python code to be executed
          * @param debug Prints errors to the EPICS console.
          * @return Variant Value returned from Python code, if any.
@@ -122,12 +124,12 @@ class PyWrapper {
 
         /**
          * @brief Destroy previously compiled bytecode
-         * 
-         * As with any Python object, the compiled bytecode needs to be 
+         *
+         * As with any Python object, the compiled bytecode needs to be
          * dereferenced after use to free-up any memory it has been using.
          * Dereferencing requires GIL to be obtained, and this function
          * will guarantee that GIL is locked.
-         * 
+         *
          * @param bytecode Previously compiled bytecode, may be empty object.
          */
         static void destroy(ByteCode&& bytecode);

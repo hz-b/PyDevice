@@ -11,6 +11,8 @@
 #include <map>
 #include <stdexcept>
 #include <iostream>
+#include <vector>
+#include <string>
 
 static PyObject* globDict = nullptr;
 static PyObject* locDict = nullptr;
@@ -30,12 +32,14 @@ struct PyGIL
 
 PyWrapper::ByteCode::ByteCode()
     : code(nullptr)
+    , do_clear(false)
 {
 }
 
-PyWrapper::ByteCode::ByteCode(void* c)
+PyWrapper::ByteCode::ByteCode(void* c, bool _do_clear)
 {
     code = c;
+    do_clear = _do_clear;
 }
 
 PyWrapper::ByteCode::~ByteCode()
@@ -46,12 +50,19 @@ PyWrapper::ByteCode::~ByteCode()
 PyWrapper::ByteCode::ByteCode(ByteCode&& o)
 {
     code = o.code;
+    do_clear = o.do_clear;
     o.code = nullptr;
+}
+
+bool PyWrapper::ByteCode::clear_pyobjects() const
+{
+    return this->do_clear;
 }
 
 PyWrapper::ByteCode& PyWrapper::ByteCode::operator=(ByteCode&& o)
 {
     code = o.code;
+    do_clear = o.do_clear;
     o.code = nullptr;
     return *this;
 }
@@ -91,6 +102,7 @@ static PyObject* pydev_iointr(PyObject* self, PyObject* args)
     }
     tmp = PyUnicode_AsASCIIString(param);
     if(!tmp){
+        PyErr_Clear();
         PyErr_SetString(PyExc_TypeError, "Unicode could not be converted to ASCII");
         Py_RETURN_NONE;
     }
@@ -281,7 +293,7 @@ bool PyWrapper::convert(void* in_, Variant& out)
 #if PY_MAJOR_VERSION < 3
             if (PyInt_Check(el) && (t == Variant::Type::NONE || t == Variant::Type::VECTOR_LONG)) {
                 long long val = PyInt_AsLong(el);
-                if (val == 1 && PyErr_Occurred()) {
+                if (val == -1 && PyErr_Occurred()) {
                     PyErr_Clear();
                     return false;
                 }
@@ -315,19 +327,25 @@ bool PyWrapper::convert(void* in_, Variant& out)
 #if PY_MAJOR_VERSION < 3
             if (PyString_Check(el) && (t == Variant::Type::NONE || t == Variant::Type::VECTOR_STRING)) {
                 const char *cval = PyString_AsString(el);
+                 PyObject *tmp = NULL; /* for symmetry with python3 code*/
 #else
             if (PyUnicode_Check(el) && (t == Variant::Type::NONE || t == Variant::Type::VECTOR_STRING)) {
-                const char *cval = PyBytes_AsString(PyUnicode_AsASCIIString(el));
+                PyObject* tmp = PyUnicode_AsASCIIString(el);
+                if(!tmp){
+                        PyErr_Clear();
+                        return false;
+                }
+                const char* cval = PyBytes_AsString(tmp);
 #endif
                 if (!cval) {
+                    Py_XDECREF(tmp);  // Free tmp before returning
                     PyErr_Clear();
                     return false;
                 }
                 vs.push_back(cval);
                 t = Variant::Type::VECTOR_STRING;
             }
-        }
-
+	}
         if (t == Variant::Type::VECTOR_LONG) {
             out = Variant(vl);
         } else if (t == Variant::Type::VECTOR_STRING) {
@@ -346,12 +364,12 @@ bool PyWrapper::convert(void* in_, Variant& out)
 PyWrapper::ByteCode PyWrapper::compile(const std::string& code, bool debug)
 {
     PyGIL gil;
-
+    bool do_clear = true;
     PyObject* bytecode = Py_CompileString(code.c_str(), "", Py_eval_input);
     if (bytecode == NULL) {
         // Ignore error, try with Py_file_input which works for 'import xxx' etc.
         PyErr_Clear();
-
+	do_clear = false;
         bytecode = Py_CompileString((code+"\n").c_str(), "", Py_file_input);
         if (bytecode == NULL) {
             if (debug) {
@@ -362,12 +380,15 @@ PyWrapper::ByteCode PyWrapper::compile(const std::string& code, bool debug)
             throw SyntaxError();
         }
     }
-    return ByteCode(bytecode);
+    // std::cerr << "Clearing code for " << code << "? " << do_clear << std::endl;
+    return ByteCode(bytecode, do_clear);
 }
 
 Variant PyWrapper::eval(const PyWrapper::ByteCode& bytecode, const std::map<std::string, Variant>& args, bool debug)
 {
     PyGIL gil;
+
+    std::vector<std::string> names_to_clear;
 
     for (auto& keyval: args) {
         PyObject* item = nullptr;
@@ -390,24 +411,36 @@ Variant PyWrapper::eval(const PyWrapper::ByteCode& bytecode, const std::map<std:
             auto vals = keyval.second.get_long_array();
             for (auto& val: vals) {
                 PyObject* element = PyLong_FromLongLong(val);
-                PyList_Append(item, element);
-                Py_DECREF(element);
+                assert(element);
+                if(PyList_Append(item, element) == 0){
+                    Py_DECREF(element);
+                } else {
+                    assert(0);
+                }
             }
         } else if (keyval.second.type == Variant::Type::VECTOR_UNSIGNED) {
             item = PyList_New(0);
             auto vals = keyval.second.get_unsigned_array();
             for (auto& val: vals) {
                 PyObject* element = PyLong_FromUnsignedLongLong(val);
-                PyList_Append(item, element);
-                Py_DECREF(element);
+                assert(element);
+                if(PyList_Append(item, element) == 0){
+                    Py_DECREF(element);
+                } else {
+                    assert(0);
+                }
             }
         } else if (keyval.second.type == Variant::Type::VECTOR_DOUBLE) {
             item = PyList_New(0);
             auto vals = keyval.second.get_double_array();
             for (auto& val: vals) {
                 PyObject* element = PyFloat_FromDouble(val);
-                PyList_Append(item, element);
-                Py_DECREF(element);
+                assert(element);
+                if(PyList_Append(item, element) == 0){
+                    Py_DECREF(element);
+                } else {
+                    assert(0);
+                };
             }
         } else if (keyval.second.type == Variant::Type::VECTOR_STRING) {
             item = PyList_New(0);
@@ -418,14 +451,22 @@ Variant PyWrapper::eval(const PyWrapper::ByteCode& bytecode, const std::map<std:
 #else
                 PyObject* element = PyUnicode_FromString(val.c_str());
 #endif
-                PyList_Append(item, element);
-                Py_DECREF(element);
+                assert(element);
+                if(PyList_Append(item, element) == 0){
+                    Py_DECREF(element);
+                } else {
+                    assert (0);
+                }
             }
         }
         if (item == nullptr) {
             throw ArgumentError();
         }
-        PyDict_SetItemString(locDict, keyval.first.c_str(), item);
+        if(PyDict_SetItemString(locDict, keyval.first.c_str(), item) == 0){
+	    names_to_clear.push_back(keyval.first);
+	} else {
+	    std::cerr << "Failed to add entry " << keyval.first << std::endl;
+	}
         if (item != Py_True && item != Py_False) {
             Py_XDECREF(item);
         }
@@ -442,6 +483,27 @@ Variant PyWrapper::eval(const PyWrapper::ByteCode& bytecode, const std::map<std:
     }
 
     PyObject *r = PyEval_EvalCode(code, globDict, locDict);
+    if (bytecode.clear_pyobjects()){
+	// std::cerr << "Clearing names "<< std::endl;
+	    for(const auto& key: names_to_clear){
+		if(PyDict_DelItemString(locDict, key.c_str()) == 0){
+		    //  std::cerr << "Removed key " << key << " from local " << std::endl;
+		} else if(PyDict_DelItemString(globDict, key.c_str()) == 0) {
+		    //  std::cerr << "Removed key " << key << " from global " << std::endl;
+		} else {
+		    std::cerr << "Failed removed key " << key << " from local or global " << std::endl;
+		}
+	    }
+    } else {
+	if (names_to_clear.size()) {
+	    std::cerr << __FILE__ << "::" << __LINE__
+		      << " not clearing names: [";
+	    for(const auto&  name: names_to_clear){
+		std::cerr << " " << name;
+	    }
+	    std::cerr<< "]"<<std::endl;
+	}
+    }
     if (r == nullptr) {
         if (debug) {
             PyErr_Print();
@@ -452,20 +514,20 @@ Variant PyWrapper::eval(const PyWrapper::ByteCode& bytecode, const std::map<std:
 
     Variant val;
     bool converted = convert(r, val);
-    Py_DecRef(r);
-
     if (!converted) {
         if (debug) {
             PyErr_Print();
         }
         PyErr_Clear();
     }
+    Py_DecRef(r);
+
     return val;
 }
 
 Variant PyWrapper::exec(const std::string &code, const std::map<std::string, Variant> &args, bool debug)
 {
-    auto bytecode = compile(code, true);
+    auto bytecode = std::move(compile(code, true));
     auto r = eval(bytecode, args, true);
     destroy(std::move(bytecode));
     return r;
